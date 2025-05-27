@@ -1,91 +1,36 @@
-import streamlit as st
-import pandas as pd
-import plotly.express as px
+from flask import Flask, redirect, request, render_template_string
+import os
 
-# Configuration de la page
-st.set_page_config(layout="wide")
-st.title("📊 Dashboard Vanilla Options – Marchés Volatility")
+app = Flask(__name__)
 
-FICHIER_CSV = "signaux_vanilla.csv"
+CLIENT_ID = os.getenv("DERIV_CLIENT_ID", "votre_client_id_ici")
+REDIRECT_URI = os.getenv("REDIRECT_URI", "https://ton-app.onrender.com/oauth-callback")
 
-try:
-    df = pd.read_csv(FICHIER_CSV)
+template_page = """
+<!DOCTYPE html>
+<html>
+<head><title>Connexion Deriv</title></head>
+<body>
+  {% if token %}
+    <h2>Token OAuth2 récupéré :</h2>
+    <p><code>{{ token }}</code></p>
+    <p>Copiez ce token pour l'utiliser dans votre app Streamlit.</p>
+  {% else %}
+    <h2>Erreur : Aucun token trouvé</h2>
+  {% endif %}
+</body>
+</html>
+"""
 
-    # Filtrer uniquement les marchés Volatility
-    df = df[df["Marché"].str.startswith("Volatility")]
-    marches_dispo = df["Marché"].unique().tolist()
-    choix = st.selectbox("🎯 Choisir un marché VIX", ["Tous"] + marches_dispo)
+@app.route("/")
+def home():
+    auth_url = f"https://oauth.deriv.com/oauth2/authorize?app_id={CLIENT_ID}&redirect_uri={REDIRECT_URI}"
+    return redirect(auth_url)
 
-    if choix != "Tous":
-        df = df[df["Marché"] == choix]
+@app.route("/oauth-callback")
+def oauth_callback():
+    token = request.args.get("token")
+    return render_template_string(template_page, token=token)
 
-    # Afficher le tableau complet
-    st.subheader("📄 Données disponibles")
-    st.dataframe(df)
-
-    # Filtrer les signaux valides (CALL ou PUT)
-    signaux_valides = df[
-        (df["RSI > 50"] == "✅") &
-        (df["Bollinger Signal"].isin(["Rebond", "Rejet"])) &
-        (df["MACD Signal"] == "✅") &
-        (df["SMA Position"].isin(["> SMA", "< SMA"]))
-    ]
-
-    st.markdown("---")
-    st.subheader("📢 Signaux Valides (CALL ou PUT)")
-
-    if signaux_valides.empty:
-        st.info("Aucun signal valide pour l’instant.")
-    else:
-        for i, row in signaux_valides.iterrows():
-            st.write(f"🕒 {row['Date']} – 📈 {row['Marché']}")
-            st.write(f"🔹 RSI: {row['RSI > 50']} | Bollinger: {row['Bollinger Signal']} | MACD: {row['MACD Signal']} | SMA: {row['SMA Position']}")
-            st.markdown("---")
-
-    # Graphiques d’indicateurs
-    st.subheader("📉 Graphiques d’indicateurs")
-
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-        rsi_data = df["RSI > 50"].value_counts().reset_index()
-        rsi_data.columns = ["RSI", "Count"]
-        fig_rsi = px.pie(rsi_data, names="RSI", values="Count", title="RSI > 50")
-        st.plotly_chart(fig_rsi, use_container_width=True)
-
-    with col2:
-        boll_data = df["Bollinger Signal"].value_counts().reset_index()
-        boll_data.columns = ["Signal", "Count"]
-        fig_boll = px.bar(boll_data, x="Signal", y="Count", title="Bollinger Signal")
-        st.plotly_chart(fig_boll, use_container_width=True)
-
-    with col3:
-        macd_data = df["MACD Signal"].value_counts().reset_index()
-        macd_data.columns = ["MACD", "Count"]
-        fig_macd = px.pie(macd_data, names="MACD", values="Count", title="MACD Signal")
-        st.plotly_chart(fig_macd, use_container_width=True)
-
-    # Résumé des marchés actifs
-    st.markdown("---")
-    st.subheader("📌 Marchés les plus actifs (RSI > 50)")
-
-    resume = df[df["RSI > 50"] == "✅"].groupby("Marché").size().reset_index(name="Nombre de signaux")
-    resume = resume.sort_values("Nombre de signaux", ascending=False)
-
-    st.dataframe(resume)
-
-    fig_resume = px.bar(
-        resume,
-        x="Marché",
-        y="Nombre de signaux",
-        text="Nombre de signaux",
-        title="Top marchés par fréquence de signaux RSI > 50"
-    )
-    fig_resume.update_traces(textposition="outside")
-    fig_resume.update_layout(xaxis_tickangle=-45)
-    st.plotly_chart(fig_resume, use_container_width=True)
-
-except FileNotFoundError:
-    st.warning("⚠️ Le fichier 'signaux_vanilla.csv' est introuvable.")
-except Exception as e:
-    st.error(f"❌ Erreur : {e}")
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000, debug=True)
